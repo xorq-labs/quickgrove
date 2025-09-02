@@ -732,7 +732,13 @@ impl ModelLoader for GradientBoostedDecisionTrees {
     fn json_loads(json: &Value) -> Result<Self, ModelError> {
         let objective_type = XGBoostParser::parse_objective(json)?;
         let (feature_names, feature_types) = XGBoostParser::parse_feature_metadata(json)?;
-        let base_score = XGBoostParser::parse_base_score(json)?;
+        let mut base_score = XGBoostParser::parse_base_score(json)?;
+        // logistic objectives, base_score is stored as probability
+        // https://stackoverflow.com/questions/78818308/how-does-xgboost-calculate-base-score
+        // TODO: do we need special handling for reg:squarederror?
+        if objective_type == Objective::Logistic {
+            base_score = (base_score / (1.0 - base_score)).ln();
+        }
         let trees_json = XGBoostParser::parse_trees(json)?;
 
         let trees = trees_json
