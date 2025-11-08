@@ -52,7 +52,7 @@ impl PyFeatureTree {
     }
 }
 
-#[pyclass]
+#[pyclass(module = "quickgrove")]
 pub struct PyGradientBoostedDecisionTrees {
     model: Arc<GradientBoostedDecisionTrees>,
 }
@@ -233,6 +233,15 @@ impl PyGradientBoostedDecisionTrees {
         self.model
             .to_json_string()
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
+    }
+
+    /// Enable pickle support by serializing to JSON
+    fn __reduce__(&self, py: Python) -> PyResult<PyObject> {
+        let json_str = self.to_json()?;
+        // Return (callable, args) where callable reconstructs the object
+        let quickgrove = py.import_bound("quickgrove")?;
+        let cls = quickgrove.getattr("PyGradientBoostedDecisionTrees")?;
+        Ok((cls, (json_str,)).into_py(py))
     }
 }
 

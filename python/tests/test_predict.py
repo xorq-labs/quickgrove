@@ -220,3 +220,87 @@ def test_to_json_pruned_model():
     )
 
     print("Pruned model JSON test passed.")
+
+
+def test_pickle_support():
+    """Test that models can be pickled and unpickled"""
+    import pickle
+
+    # Load original model
+    model = quickgrove.json_load(
+        TEST_DIR / "tests/models/reg_squarederror/diamonds_model_trees_100_mixed.json"
+    )
+
+    # Get test data
+    df = pd.read_csv(
+        TEST_DIR / "tests/data/reg_squarederror/diamonds_data_filtered_trees_100_mixed.csv"
+    )
+    actual_preds = df["prediction"].copy().to_list()
+    df = df.drop(["target", "prediction"], axis=1)
+    batch = pa.RecordBatch.from_pandas(df)
+
+    # Get predictions from original model
+    original_predictions = model.predict_batches([batch])
+
+    # Pickle and unpickle the model
+    pickled = pickle.dumps(model)
+    unpickled_model = pickle.loads(pickled)
+
+    # Test that predictions match after unpickling
+    unpickled_predictions = unpickled_model.predict_batches([batch])
+
+    np.testing.assert_array_almost_equal(
+        np.array(original_predictions),
+        np.array(unpickled_predictions),
+        decimal=5,
+        err_msg="Predictions differ after pickle roundtrip"
+    )
+
+    # Also verify against expected predictions
+    np.testing.assert_array_almost_equal(
+        np.array(unpickled_predictions),
+        np.array(actual_preds),
+        decimal=3
+    )
+
+    print("Pickle support test passed.")
+
+
+def test_pickle_pruned_model():
+    """Test that pruned models can be pickled"""
+    import pickle
+
+    model = quickgrove.json_load(
+        TEST_DIR / "tests/models/reg_squarederror/diamonds_model_trees_100_mixed.json"
+    )
+
+    # Prune the model
+    predicates = [Feature("carat") < 0.5]
+    pruned_model = model.prune(predicates)
+
+    # Get test data
+    df = pd.read_csv(
+        TEST_DIR / "tests/data/reg_squarederror/diamonds_data_filtered_trees_100_mixed.csv"
+    ).query("carat < 0.5")
+
+    df_test = df.drop(["target", "prediction"], axis=1)
+    batch = pa.RecordBatch.from_pandas(df_test)
+
+    # Get predictions from original pruned model
+    pruned_predictions = pruned_model.predict_batches([batch])
+
+    # Pickle and unpickle
+    pickled = pickle.dumps(pruned_model)
+    unpickled = pickle.loads(pickled)
+
+    # Verify predictions match
+    unpickled_predictions = unpickled.predict_batches([batch])
+
+    np.testing.assert_array_almost_equal(
+        np.array(pruned_predictions),
+        np.array(unpickled_predictions),
+        decimal=5,
+        err_msg="Pruned model predictions differ after pickle roundtrip"
+    )
+
+    print("Pruned model pickle test passed.")
