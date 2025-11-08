@@ -1334,9 +1334,13 @@ mod tests {
         // logit = ln(p / (1-p)) = ln(0.19499376 / 0.80500624) ≈ -1.4178825
         let expected_logit = (base_score_probability / (1.0 - base_score_probability)).ln();
 
-        assert!((model.base_score - expected_logit).abs() < 1e-6,
+        assert!(
+            (model.base_score - expected_logit).abs() < 1e-6,
             "Base score should be transformed from probability {} to logit {}, but got {}",
-            base_score_probability, expected_logit, model.base_score);
+            base_score_probability,
+            expected_logit,
+            model.base_score
+        );
 
         // Verify the objective is logistic
         assert_eq!(model.objective, Objective::Logistic);
@@ -1344,9 +1348,12 @@ mod tests {
         // Verify that when computing score with just base_score (no tree contributions),
         // we get back the original probability after sigmoid transformation
         let score_after_sigmoid = model.objective.compute_score(model.base_score);
-        assert!((score_after_sigmoid - base_score_probability).abs() < 1e-6,
+        assert!(
+            (score_after_sigmoid - base_score_probability).abs() < 1e-6,
             "Sigmoid of transformed base_score should equal original probability {}, but got {}",
-            base_score_probability, score_after_sigmoid);
+            base_score_probability,
+            score_after_sigmoid
+        );
     }
 
     #[test]
@@ -1396,8 +1403,11 @@ mod tests {
         let model = GradientBoostedDecisionTrees::json_loads(&model_json).unwrap();
 
         // For squared error, base_score should NOT be transformed
-        assert!((model.base_score - base_score_value).abs() < 1e-2,
+        assert!(
+            (model.base_score - base_score_value).abs() < 1e-2,
             "Base score for squared error should remain {}, but got {}",
-            base_score_value, model.base_score);
+            base_score_value,
+            model.base_score
+        );
     }
 }
