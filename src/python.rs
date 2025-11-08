@@ -227,6 +227,13 @@ impl PyGradientBoostedDecisionTrees {
             )),
         }
     }
+
+    /// Returns the model as an XGBoost-compatible JSON string
+    fn to_json(&self) -> PyResult<String> {
+        self.model
+            .to_json_string()
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
+    }
 }
 
 #[pyfunction]
