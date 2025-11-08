@@ -732,7 +732,13 @@ impl ModelLoader for GradientBoostedDecisionTrees {
     fn json_loads(json: &Value) -> Result<Self, ModelError> {
         let objective_type = XGBoostParser::parse_objective(json)?;
         let (feature_names, feature_types) = XGBoostParser::parse_feature_metadata(json)?;
-        let base_score = XGBoostParser::parse_base_score(json)?;
+        let mut base_score = XGBoostParser::parse_base_score(json)?;
+        // logistic objectives, base_score is stored as probability
+        // https://stackoverflow.com/questions/78818308/how-does-xgboost-calculate-base-score
+        // TODO: do we need special handling for reg:squarederror?
+        if objective_type == Objective::Logistic {
+            base_score = (base_score / (1.0 - base_score)).ln();
+        }
         let trees_json = XGBoostParser::parse_trees(json)?;
 
         let trees = trees_json
@@ -1273,5 +1279,135 @@ mod tests {
         assert!(required.contains(&0)); // Only feature0 is used in sample tree
         assert!(!required.contains(&1));
         assert!(!required.contains(&2));
+    }
+
+    #[test]
+    fn test_base_score_transformation_logistic() {
+        // Test that base_score is correctly transformed from probability to logit
+        // for logistic objectives during model loading
+        use serde_json::json;
+
+        // Create a minimal XGBoost JSON with a logistic objective
+        let base_score_probability = 0.19499376_f32;
+        let model_json = json!({
+            "learner": {
+                "learner_model_param": {
+                    "base_score": format!("{:E}", base_score_probability),
+                    "num_class": "0",
+                    "num_feature": "1"
+                },
+                "objective": {
+                    "name": "binary:logistic"
+                },
+                "feature_names": ["f0"],
+                "feature_types": ["float"],
+                "gradient_booster": {
+                    "model": {
+                        "gbtree_model_param": {
+                            "num_trees": "1",
+                            "num_parallel_tree": "1"
+                        },
+                        "tree_info": [0],
+                        "trees": [{
+                            "tree_param": {
+                                "num_nodes": "1",
+                                "size_leaf_vector": "1",
+                                "num_feature": "1"
+                            },
+                            "split_indices": [-1],
+                            "split_conditions": [0.0],
+                            "default_left": [0],
+                            "base_weights": [0.0],
+                            "left_children": [u32::MAX],
+                            "right_children": [u32::MAX],
+                            "sum_hessian": [1.0]
+                        }]
+                    }
+                }
+            }
+        });
+
+        // Load the model
+        let model = GradientBoostedDecisionTrees::json_loads(&model_json).unwrap();
+
+        // The base_score should be transformed from probability to logit
+        // logit = ln(p / (1-p)) = ln(0.19499376 / 0.80500624) ≈ -1.4178825
+        let expected_logit = (base_score_probability / (1.0 - base_score_probability)).ln();
+
+        assert!(
+            (model.base_score - expected_logit).abs() < 1e-6,
+            "Base score should be transformed from probability {} to logit {}, but got {}",
+            base_score_probability,
+            expected_logit,
+            model.base_score
+        );
+
+        // Verify the objective is logistic
+        assert_eq!(model.objective, Objective::Logistic);
+
+        // Verify that when computing score with just base_score (no tree contributions),
+        // we get back the original probability after sigmoid transformation
+        let score_after_sigmoid = model.objective.compute_score(model.base_score);
+        assert!(
+            (score_after_sigmoid - base_score_probability).abs() < 1e-6,
+            "Sigmoid of transformed base_score should equal original probability {}, but got {}",
+            base_score_probability,
+            score_after_sigmoid
+        );
+    }
+
+    #[test]
+    fn test_base_score_no_transformation_squarederror() {
+        // Test that base_score is NOT transformed for squared error objective
+        use serde_json::json;
+
+        let base_score_value = 3932.7998_f32;
+        let model_json = json!({
+            "learner": {
+                "learner_model_param": {
+                    "base_score": format!("{:E}", base_score_value),
+                    "num_class": "0",
+                    "num_feature": "1"
+                },
+                "objective": {
+                    "name": "reg:squarederror"
+                },
+                "feature_names": ["f0"],
+                "feature_types": ["float"],
+                "gradient_booster": {
+                    "model": {
+                        "gbtree_model_param": {
+                            "num_trees": "1",
+                            "num_parallel_tree": "1"
+                        },
+                        "tree_info": [0],
+                        "trees": [{
+                            "tree_param": {
+                                "num_nodes": "1",
+                                "size_leaf_vector": "1",
+                                "num_feature": "1"
+                            },
+                            "split_indices": [-1],
+                            "split_conditions": [0.0],
+                            "default_left": [0],
+                            "base_weights": [0.0],
+                            "left_children": [u32::MAX],
+                            "right_children": [u32::MAX],
+                            "sum_hessian": [1.0]
+                        }]
+                    }
+                }
+            }
+        });
+
+        let model = GradientBoostedDecisionTrees::json_loads(&model_json).unwrap();
+
+        // For squared error, base_score should NOT be transformed
+        assert!(
+            (model.base_score - base_score_value).abs() < 1e-2,
+            "Base score for squared error should remain {}, but got {}",
+            base_score_value,
+            model.base_score
+        );
     }
 }
