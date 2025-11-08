@@ -225,7 +225,9 @@ impl VecTreeNodes {
         use serde_json::json;
 
         let num_nodes = self.nodes.len();
-        let num_features = self.nodes.iter()
+        let num_features = self
+            .nodes
+            .iter()
             .filter(|n| !n.is_leaf())
             .map(|n| n.feature_index() as usize + 1)
             .max()
@@ -497,9 +499,11 @@ impl GradientBoostedDecisionTrees {
             self.base_score
         };
 
-        let trees_json: Vec<Value> = self.trees.iter().map(|tree| {
-            tree.to_json(&self.feature_names)
-        }).collect();
+        let trees_json: Vec<Value> = self
+            .trees
+            .iter()
+            .map(|tree| tree.to_json(&self.feature_names))
+            .collect();
 
         let num_features = self.feature_names.len();
         let num_trees = self.trees.len();
