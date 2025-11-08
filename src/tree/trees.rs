@@ -220,6 +220,63 @@ impl VecTreeNodes {
         FeatureTreeBuilder::new()
     }
 
+    /// Serializes the tree to XGBoost JSON format
+    pub fn to_json(&self, _feature_names: &[String]) -> Value {
+        use serde_json::json;
+
+        let num_nodes = self.nodes.len();
+        let num_features = self
+            .nodes
+            .iter()
+            .filter(|n| !n.is_leaf())
+            .map(|n| n.feature_index() as usize + 1)
+            .max()
+            .unwrap_or(0);
+
+        let mut split_indices = Vec::with_capacity(num_nodes);
+        let mut split_conditions = Vec::with_capacity(num_nodes);
+        let mut default_left = Vec::with_capacity(num_nodes);
+        let mut base_weights = Vec::with_capacity(num_nodes);
+        let mut left_children = Vec::with_capacity(num_nodes);
+        let mut right_children = Vec::with_capacity(num_nodes);
+        let mut sum_hessian = Vec::with_capacity(num_nodes);
+
+        for node in &self.nodes {
+            if node.is_leaf() {
+                split_indices.push(-1);
+                split_conditions.push(0.0);
+                default_left.push(0);
+                base_weights.push(node.weight());
+                left_children.push(u32::MAX);
+                right_children.push(u32::MAX);
+                sum_hessian.push(1.0);
+            } else {
+                split_indices.push(node.feature_index());
+                split_conditions.push(node.split_value());
+                default_left.push(if node.default_left() { 1 } else { 0 });
+                base_weights.push(0.0);
+                left_children.push(node.left() as u32);
+                right_children.push(node.right() as u32);
+                sum_hessian.push(1.0);
+            }
+        }
+
+        json!({
+            "tree_param": {
+                "num_nodes": num_nodes.to_string(),
+                "size_leaf_vector": "1",
+                "num_feature": num_features.to_string()
+            },
+            "split_indices": split_indices,
+            "split_conditions": split_conditions,
+            "default_left": default_left,
+            "base_weights": base_weights,
+            "left_children": left_children,
+            "right_children": right_children,
+            "sum_hessian": sum_hessian
+        })
+    }
+
     fn from_nodes(nodes: Vec<NodeDefinition>) -> Result<Self, FeatureTreeError> {
         if nodes.is_empty() {
             return Err(FeatureTreeError::InvalidStructure("Empty tree".to_string()));
@@ -428,6 +485,63 @@ impl GradientBoostedDecisionTrees {
 
     pub fn get_required_features(&self) -> &HashSet<usize> {
         &self.required_features
+    }
+
+    /// Serializes the model to XGBoost JSON format
+    pub fn to_json(&self) -> serde_json::Value {
+        use serde_json::json;
+
+        // For logistic objectives, convert base_score from logit back to probability
+        let base_score_output = if self.objective == Objective::Logistic {
+            // Convert from logit to probability: p = 1 / (1 + e^(-logit))
+            1.0 / (1.0 + (-self.base_score).exp())
+        } else {
+            self.base_score
+        };
+
+        let trees_json: Vec<Value> = self
+            .trees
+            .iter()
+            .map(|tree| tree.to_json(&self.feature_names))
+            .collect();
+
+        let num_features = self.feature_names.len();
+        let num_trees = self.trees.len();
+
+        let objective_name = match self.objective {
+            Objective::SquaredError => "reg:squarederror",
+            Objective::Logistic => "binary:logistic",
+        };
+
+        json!({
+            "learner": {
+                "learner_model_param": {
+                    "base_score": format!("{:E}", base_score_output),
+                    "num_class": "0",
+                    "num_feature": num_features.to_string()
+                },
+                "objective": {
+                    "name": objective_name
+                },
+                "feature_names": (*self.feature_names).clone(),
+                "feature_types": self.feature_types.iter().map(|ft| ft.to_string()).collect::<Vec<_>>(),
+                "gradient_booster": {
+                    "model": {
+                        "gbtree_model_param": {
+                            "num_trees": num_trees.to_string(),
+                            "num_parallel_tree": "1"
+                        },
+                        "tree_info": (0..num_trees).collect::<Vec<_>>(),
+                        "trees": trees_json
+                    }
+                }
+            }
+        })
+    }
+
+    /// Serializes the model to an XGBoost JSON string
+    pub fn to_json_string(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(&self.to_json())
     }
 
     fn collect_required_features(trees: &[VecTreeNodes]) -> HashSet<usize> {

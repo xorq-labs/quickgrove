@@ -15,8 +15,8 @@ pub use predicates::{Condition, Predicate};
 pub use tree::{FeatureTreeBuilder, GradientBoostedDecisionTrees, VecTreeNodes};
 
 #[pymodule]
-fn trusty(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    let internal = py.import_bound("trusty._internal")?;
+fn quickgrove(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let internal = py.import_bound("quickgrove._internal")?;
     m.add("_internal", internal)?;
     Ok(())
 }
