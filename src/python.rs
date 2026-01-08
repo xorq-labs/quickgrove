@@ -9,8 +9,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::pyarrow::PyArrowType;
 use arrow::record_batch::RecordBatch;
 use pyo3::prelude::*;
-use pyo3::types::PyList;
-use pyo3::types::PyType;
+use pyo3::types::{PyList, PyTuple, PyType};
 use pyo3_arrow::error::PyArrowResult;
 use pyo3_arrow::PyArray;
 use std::path::PathBuf;
@@ -89,7 +88,7 @@ impl PyGradientBoostedDecisionTrees {
         py_record_batches: &Bound<'_, PyList>,
         row_chunk_size: usize,
         tree_chunk_size: usize,
-    ) -> PyArrowResult<PyObject> {
+    ) -> PyArrowResult<Py<PyAny>> {
         let mut batches = Vec::with_capacity(py_record_batches.len());
         // Need this clone to make config work. perhaps, another way to avoid it?
         let model = Arc::new({
@@ -142,7 +141,9 @@ impl PyGradientBoostedDecisionTrees {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
 
         let field = Field::new("predictions", DataType::Float32, false);
-        Ok(PyArray::new(Arc::new(predictions_array), Arc::new(field)).to_pyarrow(py)?)
+        Ok(PyArray::new(Arc::new(predictions_array), Arc::new(field))
+            .to_pyarrow(py)?
+            .unbind())
     }
 
     fn prune(&self, predicates: &Bound<'_, PyList>) -> PyResult<Self> {
@@ -185,7 +186,11 @@ impl PyGradientBoostedDecisionTrees {
         Ok(format!("{}", self.model))
     }
 
-    fn predict_arrays(&self, py: Python, py_arrays: &Bound<'_, PyList>) -> PyArrowResult<PyObject> {
+    fn predict_arrays(
+        &self,
+        py: Python,
+        py_arrays: &Bound<'_, PyList>,
+    ) -> PyArrowResult<Py<PyAny>> {
         let mut arrays = Vec::with_capacity(py_arrays.len());
 
         for py_array in py_arrays.iter() {
@@ -209,7 +214,9 @@ impl PyGradientBoostedDecisionTrees {
         let predictions_ref: ArrayRef = Arc::new(predictions_array);
         let field = Arc::new(Field::new("predictions", DataType::Float32, false));
 
-        Ok(PyArray::new(predictions_ref, field).to_pyarrow(py)?)
+        Ok(PyArray::new(predictions_ref, field)
+            .to_pyarrow(py)?
+            .unbind())
     }
 
     #[pyo3(signature = (tree_index=None))]
@@ -236,12 +243,13 @@ impl PyGradientBoostedDecisionTrees {
     }
 
     /// Enable pickle support by serializing to JSON
-    fn __reduce__(&self, py: Python) -> PyResult<PyObject> {
+    fn __reduce__(&self, py: Python) -> PyResult<Py<PyAny>> {
         let json_str = self.to_json()?;
         // Return (callable, args) where callable reconstructs the object
-        let quickgrove = py.import_bound("quickgrove")?;
+        let quickgrove = py.import("quickgrove")?;
         let cls = quickgrove.getattr("PyGradientBoostedDecisionTrees")?;
-        Ok((cls, (json_str,)).into_py(py))
+        PyTuple::new(py, vec![cls, PyTuple::new(py, vec![json_str])?.into_any()])
+            .map(|t| t.into_any().unbind())
     }
 }
 

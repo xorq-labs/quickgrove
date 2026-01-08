@@ -16,7 +16,7 @@ pub use tree::{FeatureTreeBuilder, GradientBoostedDecisionTrees, VecTreeNodes};
 
 #[pymodule]
 fn quickgrove(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    let internal = py.import_bound("quickgrove._internal")?;
+    let internal = py.import("quickgrove._internal")?;
     m.add("_internal", internal)?;
     Ok(())
 }
