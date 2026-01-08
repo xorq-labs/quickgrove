@@ -3,7 +3,9 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use datafusion::prelude::*;
 use datafusion_common::Result as DataFusionResult;
-use datafusion_expr::{ColumnarValue, ScalarUDF, ScalarUDFImpl, Signature, Volatility};
+use datafusion_expr::{
+    ColumnarValue, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl, Signature, Volatility,
+};
 use serde_json::Value;
 use std::any::Any;
 use std::error::Error;
@@ -42,8 +44,26 @@ const MODEL_JSON: &str = r#"{
 #[derive(Debug, Clone)]
 struct TrustyUDF {
     signature: Signature,
-    trees: GradientBoostedDecisionTrees,
+    trees: Arc<GradientBoostedDecisionTrees>,
     return_type: DataType,
+}
+
+impl PartialEq for TrustyUDF {
+    fn eq(&self, other: &Self) -> bool {
+        self.signature == other.signature
+            && self.return_type == other.return_type
+            && Arc::ptr_eq(&self.trees, &other.trees)
+    }
+}
+
+impl Eq for TrustyUDF {}
+
+impl std::hash::Hash for TrustyUDF {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.signature.hash(state);
+        self.return_type.hash(state);
+        Arc::as_ptr(&self.trees).hash(state);
+    }
 }
 
 impl TrustyUDF {
@@ -61,7 +81,7 @@ impl TrustyUDF {
         }
         Ok(Self {
             signature: Signature::exact(arg_types, Volatility::Immutable),
-            trees: model,
+            trees: Arc::new(model),
             return_type: DataType::Float32,
         })
     }
@@ -84,8 +104,9 @@ impl ScalarUDFImpl for TrustyUDF {
         Ok(self.return_type.clone())
     }
 
-    fn invoke(&self, args: &[ColumnarValue]) -> DataFusionResult<ColumnarValue> {
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DataFusionResult<ColumnarValue> {
         let arrays: Vec<ArrayRef> = args
+            .args
             .iter()
             .map(|arg| match arg {
                 ColumnarValue::Array(arr) => Ok(Arc::clone(arr)),
